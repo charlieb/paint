@@ -7,15 +7,6 @@ from numba import jit, int64, float64
 import sys
 import getopt
 
-nlinks = 10
-struct_dtype = np.dtype([
-    ('pos', 'float64', 2),
-    ('gnd_pos', 'float64', 2),
-    ('gnd_len', 'float64'),
-    ('gnd_max_len', 'float64'),
-    ('links', 'int64', nlinks),
-    ('link_lens', 'float64', nlinks),
-    ('link_max_lens', 'float64', nlinks)])
 
 #@jit(nopython=True)
 def shuffle(grid):
@@ -41,6 +32,10 @@ def shuffle(grid):
                 elif lnk == j:
                     g['links'][li] = i
 
+# Init size constant
+nlinks = 10
+
+# Array reference constants
 POS=0
 GND=1
 GND_LEN=2
@@ -48,16 +43,20 @@ LEN=0
 MAX_LEN=1
 X=0
 Y=1
+
+# Behaviour constants
+gnd_min = 0.1
+gnd_max = 1.0
+len_mult_min = 1.1
+len_mult_max = 1.5
+
+lcs = 0.70 # link constraint strength
+gcs = 0.20 # ground constraint strength
+lef = 0.50 # link expansion factor
+gef = 0.75 # ground link expansion factor
+
 #@jit(nopython=True)
 def make_grid(x,y):
-    gnd_max = 1.0
-    gnd_min = 0.5
-    len_mult_max = 1.5
-    len_mult_min = 2.0
-    # grid[n][0] = pos
-    # grid[n][1] = gnd_pos
-    # grid[n][2][0] = gnd_len
-    # grid[n][2][1] = gnd_max_len
     grid = np.zeros((x*y, 3, 2), dtype=np.float64)
     links = np.zeros((x*y, nlinks), dtype=np.int64)
     link_lens = np.zeros((x*y, nlinks, 2), dtype=np.float64)
@@ -91,15 +90,9 @@ def make_grid(x,y):
 def expand_grid(grid):
     for g in grid:
         g[GND][X] *= 1.1
-        g[POS][X] *= 1.1
 
-#@jit(nopython=True)
-def iterate(grid, links, link_lens, t=0.1, constraint_iterations=1):
-    lcs = 0.30 # link constraint strength
-    gcs = 0.99 # ground constraint strength
-    lef = 1.00 # link expansion factor
-    gef = 1.00 # ground link expansion factor
-
+@jit((float64[:,:,:], int64[:,:], float64[:,:], int64))
+def iterate(grid, links, link_lens, constraint_iterations=5):
     # One break is allowed per iteration
     # When one link breaks we:
     # Recacluate the constraints then
@@ -115,7 +108,7 @@ def iterate(grid, links, link_lens, t=0.1, constraint_iterations=1):
                     d = g[POS] - grid[link][POS]
                     dmag = sqrt(d[0]**2 + d[1]**2)
                     if dmag > 0.:
-                        mv = lcs * 0.5 * (dmag - link_len) * d / dmag
+                        mv = lcs * 0.5 * (dmag - link_len[LEN]) * d / dmag
                         g[POS] -= mv
                         grid[link][POS] += mv
 
@@ -156,7 +149,6 @@ def iterate(grid, links, link_lens, t=0.1, constraint_iterations=1):
                     # remove link
                     g[GND_LEN][LEN] = -1
                     one_broke = True
-                    break
 
 def draw(grid, links, frame):
     dwg = svg.Drawing('test%05d.svg'%frame)
@@ -206,6 +198,12 @@ def draw2(grid, links, frame):
 
     dwg.save()
 
+def print_grid(grid, links, link_lens):
+    for i, (g,li,ll) in enumerate(zip(grid, links, link_lens)):
+        print(i, g)
+        print(i, li)
+        print(i, ll)
+
 def main():
     try:
         opts, args = getopt.getopt(sys.argv[1:], "s:l:", ('save=', 'load='))
@@ -225,11 +223,11 @@ def main():
         grid, links, link_lens = arys['grid'], arys['links'], arys['link_lens']
         draw2(grid, links, -1)
     else:
-        x,y = 10,10
+        x,y = 20,20
         grid, links, link_lens = make_grid(x,y)
         #shuffle(grid)
         draw(grid, links, -1)
-        for i in range(10):
+        for i in range(100):
             expand_grid(grid)
             iterate(grid, links, link_lens)
             draw(grid, links, i)

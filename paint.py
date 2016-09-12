@@ -10,6 +10,7 @@ import getopt
 
 # Init size constant
 nlinks = 10
+x,y = 20,20
 
 # Array reference constants
 POS=0
@@ -26,11 +27,13 @@ gnd_max = 1.0
 len_mult_min = 1.1
 len_mult_max = 1.5
 
-lcs = 0.60 # link constraint strength
-gcs = 0.20 # ground constraint strength
+lcs = 0.50 # link constraint strength
+gcs = 0.30 # ground constraint strength
 lef = 0.50 # link expansion factor
 gef = 0.75 # ground link expansion factor
 
+allowed_breaks = 5 # the number of link breaks before a re-relaxation is triggered
+                   # higher number = higher performance but may impact accuracy if too high
 
 #@jit(nopython=True)
 def shuffle(grid, links):
@@ -116,7 +119,6 @@ def relax(grid, links, link_lens, iterations):
 
 @jit((float64[:,:,:], int64[:,:], float64[:,:], int64))
 def iterate(grid, links, link_lens, constraint_iterations=5):
-    allowed_breaks = 5 # higher number = higher performance but may impact accuracy if too high
     breaks = 1
     # A number of breaks is allowed per iteration
     # When one link breaks we:
@@ -156,7 +158,7 @@ def iterate(grid, links, link_lens, constraint_iterations=5):
                     g[GND_LEN][LEN] = -1
                     breaks += 1
 
-def draw(grid, links, filename, frame):
+def draw(grid, links, filename, frame, draw_circles=False):
     dwg = svg.Drawing('%s%05d.svg'%(filename, frame))
     minx = miny =  9999999
     maxx = maxy = -9999999
@@ -166,6 +168,13 @@ def draw(grid, links, filename, frame):
         miny = g[POS][1] if g[POS][1] < miny else miny
         maxy = g[POS][1] if g[POS][1] > maxy else maxy
 
+        if draw_circles:
+            circ = svg.shapes.Circle((g[POS][0], g[POS][1]), 0.1,
+                                    fill='blue',
+                                    stroke='none',
+                                    stroke_width=0.1)
+            dwg.add(circ)
+
         for lnk in [k for k in glinks if k != -1]:
             line = svg.shapes.Line((g[POS][0], g[POS][1]),
                                     (grid[lnk][POS][0], grid[lnk][POS][1]),
@@ -174,7 +183,7 @@ def draw(grid, links, filename, frame):
             dwg.add(line)
 
     dwg.viewbox(minx=minx-2, miny=miny-2, 
-                width=maxx-minx+2, height=maxy-miny+2)
+                width=maxx-minx+4, height=maxy-miny+4)
 
     dwg.save()
 
@@ -200,7 +209,7 @@ def draw2(grid, links, filename, frame):
             dwg.add(line)
 
     dwg.viewbox(minx=minx-2, miny=miny-2, 
-                width=maxx-minx+2, height=maxy-miny+2)
+                width=maxx-minx+4, height=maxy-miny+4)
 
     dwg.save()
 
@@ -229,7 +238,6 @@ def main():
         grid, links, link_lens = arys['grid'], arys['links'], arys['link_lens']
         draw2(grid, links, load_fn, -1)
     else:
-        x,y = 20,20
         grid, links, link_lens = make_grid(x,y)
         shuffle(grid, links)
         draw(grid, links, save_fn, -1)
@@ -243,7 +251,6 @@ def main():
         print()
 
 if __name__ == '__main__':
-    main()
     t0 = time.time()
     main()
     t1 = time.time()

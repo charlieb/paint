@@ -5,32 +5,8 @@ from math import sqrt
 import svgwrite as svg
 from numba import jit, int64, float64
 import sys
+import time
 import getopt
-
-
-#@jit(nopython=True)
-def shuffle(grid):
-    for i in range(grid.shape[0]-2):
-        j = int(random() * (grid.shape[0] - i))
-        #grid[i], grid[j] = grid[j], grid[i]
-        #tmp = np.copy(grid[i])
-        #np.copyto(grid[i], grid[j])
-        #np.copyto(grid[j], tmp)
-        tmp = np.zeros(1, dtype=struct_dtype)
-        print(tmp, '\n', grid[i], '\n', grid[j])
-        np.copyto(tmp, grid[i])
-        np.copyto(grid[i], grid[j])
-        np.copyto(grid[j], tmp)
-        #grid[i] = np.copy(grid[j])
-        #grid[j] = np.copy(tmp)
-        print(tmp, '\n', grid[i], '\n', grid[j])
-        print('---')
-        for g in grid:
-            for li, lnk in enumerate(g['links']):
-                if lnk == i:
-                    g['links'][li] = j
-                elif lnk == j:
-                    g['links'][li] = i
 
 # Init size constant
 nlinks = 10
@@ -50,10 +26,33 @@ gnd_max = 1.0
 len_mult_min = 1.1
 len_mult_max = 1.5
 
-lcs = 0.70 # link constraint strength
+lcs = 0.60 # link constraint strength
 gcs = 0.20 # ground constraint strength
 lef = 0.50 # link expansion factor
 gef = 0.75 # ground link expansion factor
+
+
+#@jit(nopython=True)
+def shuffle(grid, links):
+    tmp_grid = np.zeros((1,3,2), dtype=np.float64)
+    tmp_links = np.zeros((1,nlinks), dtype=np.int64)
+    for i in range(grid.shape[0]-2):
+        j = int(random() * (grid.shape[0] - i))
+
+        np.copyto(tmp_grid[0], grid[i])
+        np.copyto(grid[i], grid[j])
+        np.copyto(grid[j], tmp_grid[0])
+
+        np.copyto(tmp_links[0], links[i])
+        np.copyto(links[i], links[j])
+        np.copyto(links[j], tmp_links[0])
+
+        for glink in links:
+            for li, link in enumerate(glink):
+                if link == i:
+                    glink[li] = j
+                elif link == j:
+                    glink[li] = i
 
 #@jit(nopython=True)
 def make_grid(x,y):
@@ -62,8 +61,8 @@ def make_grid(x,y):
     link_lens = np.zeros((x*y, nlinks, 2), dtype=np.float64)
     for i in range(x*y):
         g = grid[i]
-        g[POS] = [i%x, i//x]
-        g[GND] = [i%x, i//x]
+        g[POS] = [i%x - x/2., i//x - y/2.]
+        g[GND] = [i%x - x/2., i//x - y/2.]
         g[GND_LEN][LEN] = 0.
         g[GND_LEN][MAX_LEN] = gnd_min + random() * (gnd_max - gnd_min)
         links[i] = [-1]*nlinks
@@ -92,41 +91,48 @@ def expand_grid(grid):
         g[GND][X] *= 1.1
 
 @jit((float64[:,:,:], int64[:,:], float64[:,:], int64))
+def relax(grid, links, link_lens, iterations):
+    for _ in range(iterations):
+        for g, glinks, glink_lens in zip(grid, links, link_lens):
+            for link, link_len in zip(glinks, glink_lens):
+                if link == -1: continue
+
+                d = g[POS] - grid[link][POS]
+                dmag = sqrt(d[0]**2 + d[1]**2)
+                if dmag > 0.:
+                    mv = lcs * 0.5 * (dmag - link_len[LEN]) * d / dmag
+                    g[POS] -= mv
+                    grid[link][POS] += mv
+
+        for g in grid:
+            # Ground linkage
+            if g[GND_LEN][LEN] > -1: # not broken
+                d = g[POS] - g[GND]
+                dmag = sqrt(d[0]**2 + d[1]**2)
+                if dmag > 0.:
+                    mv = gcs * (dmag - g[GND_LEN][LEN]) * d / dmag
+                    g[POS] -= mv
+
+
+@jit((float64[:,:,:], int64[:,:], float64[:,:], int64))
 def iterate(grid, links, link_lens, constraint_iterations=5):
-    # One break is allowed per iteration
+    allowed_breaks = 5 # higher number = higher performance but may impact accuracy if too high
+    breaks = 1
+    # A number of breaks is allowed per iteration
     # When one link breaks we:
     # Recacluate the constraints then
     # Recalculate the strains in the grid
-    one_broke = True
-    while one_broke:
+    while breaks > 0:
         # Apply constraints
-        for _ in range(constraint_iterations):
-            for g, glinks, glink_lens in zip(grid, links, link_lens):
-                for link, link_len in zip(glinks, glink_lens):
-                    if link == -1: continue
-
-                    d = g[POS] - grid[link][POS]
-                    dmag = sqrt(d[0]**2 + d[1]**2)
-                    if dmag > 0.:
-                        mv = lcs * 0.5 * (dmag - link_len[LEN]) * d / dmag
-                        g[POS] -= mv
-                        grid[link][POS] += mv
-
-            for g in grid:
-                # Ground linkage
-                if g[GND_LEN][LEN] > -1: # not broken
-                    d = g[POS] - g[GND]
-                    dmag = sqrt(d[0]**2 + d[1]**2)
-                    if dmag > 0.:
-                        mv = gcs * (dmag - g[GND_LEN][LEN]) * d / dmag
-                        g[POS] -= mv
+        relax(grid, links, link_lens, constraint_iterations)
 
         # calculate the strain and adjust link length for all the links
         # If we get through all the length adjustments without a break then we
         # can exit the procedure
-        one_broke = False
+        breaks = 0
         for g, glinks, glink_lens in zip(grid, links, link_lens):
-            if one_broke: break
+            if breaks >= allowed_breaks: break
+
             for i, (link, link_len) in enumerate(zip(glinks, glink_lens)):
                 if link == -1: continue
 
@@ -137,8 +143,8 @@ def iterate(grid, links, link_lens, constraint_iterations=5):
                 if link_len[LEN] > link_len[MAX_LEN]:
                     # remove link
                     glinks[i] = -1
-                    one_broke = True
-                    break
+                    breaks += 1
+                    if breaks >= allowed_breaks: break
 
             if g[GND_LEN][LEN] > -1: # not broken
                 d = g[POS] - g[GND]
@@ -148,10 +154,10 @@ def iterate(grid, links, link_lens, constraint_iterations=5):
                 if g[GND_LEN][LEN] > g[GND_LEN][MAX_LEN]:
                     # remove link
                     g[GND_LEN][LEN] = -1
-                    one_broke = True
+                    breaks += 1
 
-def draw(grid, links, frame):
-    dwg = svg.Drawing('test%05d.svg'%frame)
+def draw(grid, links, filename, frame):
+    dwg = svg.Drawing('%s%05d.svg'%(filename, frame))
     minx = miny =  9999999
     maxx = maxy = -9999999
     for g, glinks in zip(grid, links):
@@ -172,8 +178,8 @@ def draw(grid, links, frame):
 
     dwg.save()
 
-def draw2(grid, links, frame):
-    dwg = svg.Drawing('test%05d.svg'%frame)
+def draw2(grid, links, filename, frame):
+    dwg = svg.Drawing('%s%05d.svg'%(filename, frame))
     minx = miny =  9999999
     maxx = maxy = -9999999
     for g, glinks in zip(grid, links):
@@ -221,16 +227,16 @@ def main():
     if load_fn != '':
         arys = np.loadz(load_fn)
         grid, links, link_lens = arys['grid'], arys['links'], arys['link_lens']
-        draw2(grid, links, -1)
+        draw2(grid, links, load_fn, -1)
     else:
         x,y = 20,20
         grid, links, link_lens = make_grid(x,y)
-        #shuffle(grid)
-        draw(grid, links, -1)
+        shuffle(grid, links)
+        draw(grid, links, save_fn, -1)
         for i in range(100):
             expand_grid(grid)
             iterate(grid, links, link_lens)
-            draw(grid, links, i)
+            draw(grid, links, save_fn, i)
             np.savez(save_fn + '%05d.npy'%i, grid=grid, links=links, link_lens=link_lens)
             print('.', end='')
             sys.stdout.flush()
@@ -238,3 +244,8 @@ def main():
 
 if __name__ == '__main__':
     main()
+    t0 = time.time()
+    main()
+    t1 = time.time()
+
+    print("Elapsed:", t1-t0)

@@ -9,8 +9,8 @@ import time
 import getopt
 
 # Init size constant
-nlinks = 10
-x,y = 20,20
+nlinks = 3
+x,y = 50,50
 
 # Array reference constants
 POS=0
@@ -28,14 +28,14 @@ len_mult_min = 1.1
 len_mult_max = 1.5
 
 lcs = 0.50 # link constraint strength
-gcs = 0.30 # ground constraint strength
+gcs = 0.99 # ground constraint strength
 lef = 0.50 # link expansion factor
 gef = 0.75 # ground link expansion factor
 
 allowed_breaks = 5 # the number of link breaks before a re-relaxation is triggered
                    # higher number = higher performance but may impact accuracy if too high
 
-#@jit(nopython=True)
+@jit((float64[:,:,:], int64[:,:]))
 def shuffle(grid, links):
     tmp_grid = np.zeros((1,3,2), dtype=np.float64)
     tmp_links = np.zeros((1,nlinks), dtype=np.int64)
@@ -66,7 +66,7 @@ def make_grid(x,y):
         g = grid[i]
         g[POS] = [i%x - x/2., i//x - y/2.]
         g[GND] = [i%x - x/2., i//x - y/2.]
-        g[GND_LEN][LEN] = 0.
+        g[GND_LEN][LEN] = 0. if random() > 0.5 else -1
         g[GND_LEN][MAX_LEN] = gnd_min + random() * (gnd_max - gnd_min)
         links[i] = [-1]*nlinks
         link_lens[i] = [[0.,0.]]*nlinks
@@ -93,28 +93,44 @@ def expand_grid(grid):
     for g in grid:
         g[GND][X] *= 1.1
 
+np.seterr(all='raise')
 @jit((float64[:,:,:], int64[:,:], float64[:,:], int64))
 def relax(grid, links, link_lens, iterations):
+
+    # accumulate all the vectors and their weights into:
+    accum = np.zeros((grid.shape[0], 2), dtype=np.float64)
+    weight = np.zeros(grid.shape[0], dtype=np.float64)
+
     for _ in range(iterations):
-        for g, glinks, glink_lens in zip(grid, links, link_lens):
-            for link, link_len in zip(glinks, glink_lens):
+        accum.fill(0.)
+        weight.fill(0.)
+        for i in range(grid.shape[0]):
+            for link, link_len in zip(links[i], link_lens[i]):
                 if link == -1: continue
 
-                d = g[POS] - grid[link][POS]
+                d = grid[i][POS] - grid[link][POS]
+
                 dmag = sqrt(d[0]**2 + d[1]**2)
                 if dmag > 0.:
                     mv = lcs * 0.5 * (dmag - link_len[LEN]) * d / dmag
-                    g[POS] -= mv
-                    grid[link][POS] += mv
+                    accum[i] -= mv
+                    accum[link] += mv
+                    weight[i] += lcs
+                    weight[link] += lcs
 
-        for g in grid:
             # Ground linkage
-            if g[GND_LEN][LEN] > -1: # not broken
-                d = g[POS] - g[GND]
+            if grid[i][GND_LEN][LEN] > -1: # not broken
+                d = grid[i][POS] - grid[i][GND]
                 dmag = sqrt(d[0]**2 + d[1]**2)
                 if dmag > 0.:
-                    mv = gcs * (dmag - g[GND_LEN][LEN]) * d / dmag
-                    g[POS] -= mv
+                    mv = gcs * (dmag - grid[i][GND_LEN][LEN]) * d / dmag
+                    accum[i] -= mv
+                    weight[i] += gcs
+
+        # finally unweight and apply the vectors
+        for i in range(grid.shape[0]):
+            if weight[i] > 0.:
+                grid[i][POS] += accum[i] / weight[i]
 
 
 @jit((float64[:,:,:], int64[:,:], float64[:,:], int64))
@@ -238,14 +254,26 @@ def main():
         grid, links, link_lens = arys['grid'], arys['links'], arys['link_lens']
         draw2(grid, links, load_fn, -1)
     else:
+        t0 = time.time()
         grid, links, link_lens = make_grid(x,y)
+        t1 = time.time()
+        print("Make Grid Elapsed:", t1-t0)
+
+        t0 = time.time()
         shuffle(grid, links)
+        t1 = time.time()
+        print("Shuffle Elapsed:", t1-t0)
+
+        t0 = time.time()
         draw(grid, links, save_fn, -1)
-        for i in range(100):
+        t1 = time.time()
+        print("Draw Elapsed:", t1-t0)
+
+        for i in range(10):
             expand_grid(grid)
             iterate(grid, links, link_lens)
             draw(grid, links, save_fn, i)
-            np.savez(save_fn + '%05d.npy'%i, grid=grid, links=links, link_lens=link_lens)
+            np.savez(save_fn + '%05d'%i, grid=grid, links=links, link_lens=link_lens)
             print('.', end='')
             sys.stdout.flush()
         print()

@@ -10,7 +10,7 @@ import getopt
 
 # Init size constant
 nlinks = 3
-x,y = 50,50
+x,y = 20,20
 
 # Array reference constants
 POS=0
@@ -156,9 +156,8 @@ def iterate(grid, links, link_lens, constraint_iterations=5):
 
                 d = g[POS] - grid[link][POS]
                 dmag = sqrt(d[0]**2 + d[1]**2)
-                link_len[LEN] += lef * (dmag - link_len[LEN])
 
-                if link_len[LEN] > link_len[MAX_LEN]:
+                if dmag > link_len[MAX_LEN]:
                     # remove link
                     glinks[i] = -1
                     breaks += 1
@@ -167,9 +166,8 @@ def iterate(grid, links, link_lens, constraint_iterations=5):
             if g[GND_LEN][LEN] > -1: # not broken
                 d = g[POS] - g[GND]
                 dmag = sqrt(d[0]**2 + d[1]**2)
-                g[GND_LEN][LEN] += gef * (dmag - g[GND_LEN][LEN])
 
-                if g[GND_LEN][LEN] > g[GND_LEN][MAX_LEN]:
+                if dmag > g[GND_LEN][MAX_LEN]:
                     # remove link
                     g[GND_LEN][LEN] = -1
                     breaks += 1

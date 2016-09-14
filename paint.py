@@ -23,7 +23,7 @@ Y=1
 
 # Behaviour constants
 gnd_min = 0.1
-gnd_max = 1.0
+gnd_max = 2.0
 len_mult_min = 1.1
 len_mult_max = 1.5
 
@@ -35,10 +35,26 @@ gef = 0.75 # ground link expansion factor
 allowed_breaks = 5 # the number of link breaks before a re-relaxation is triggered
                    # higher number = higher performance but may impact accuracy if too high
 
-@jit((float64[:,:,:], int64[:,:]))
-def shuffle(grid, links):
+# Randome number generator choice
+rng = lambda : abs(np.random.normal())
+#rng = random
+
+#gnd_link = lambda i,x,y: 0 # All attached 
+gnd_link = lambda i,x,y: 0. if random() > 0.5 else -1 # Some attached
+#gnd_link = lambda i,x,_: 0 if i % x == 0 or i % x == x-1 else -1 # Attach vertical edges only
+
+relax_iterations = 50 # how many iterations of the constraint solver to apply - more=accurate, fewer=fast
+                      # if it's set too low then the forces applied may not be able to propogate
+                      # through the whole net in time causing non-physicsy things to happen
+                      # Generally you need at more iterations than there
+                      # are horizontal or vertical links for reasonable
+                      # certainty
+
+#@jit((float64[:,:,:], int64[:,:]))
+def shuffle(grid, links, link_lens):
     tmp_grid = np.zeros((1,3,2), dtype=np.float64)
     tmp_links = np.zeros((1,nlinks), dtype=np.int64)
+    tmp_lens = np.zeros((1,nlinks,2), dtype=np.float64)
     for i in range(grid.shape[0]-2):
         j = int(random() * (grid.shape[0] - i))
 
@@ -49,6 +65,10 @@ def shuffle(grid, links):
         np.copyto(tmp_links[0], links[i])
         np.copyto(links[i], links[j])
         np.copyto(links[j], tmp_links[0])
+
+        np.copyto(tmp_lens[0], link_lens[i])
+        np.copyto(link_lens[i], link_lens[j])
+        np.copyto(link_lens[j], tmp_lens[0])
 
         for glink in links:
             for li, link in enumerate(glink):
@@ -66,8 +86,8 @@ def make_grid(x,y):
         g = grid[i]
         g[POS] = [i%x - x/2., i//x - y/2.]
         g[GND] = [i%x - x/2., i//x - y/2.]
-        g[GND_LEN][LEN] = 0. if random() > 0.5 else -1
-        g[GND_LEN][MAX_LEN] = gnd_min + random() * (gnd_max - gnd_min)
+        g[GND_LEN][LEN] = gnd_link(i,x,y)
+        g[GND_LEN][MAX_LEN] = gnd_min + rng() * (gnd_max - gnd_min)
         links[i] = [-1]*nlinks
         link_lens[i] = [[0.,0.]]*nlinks
 
@@ -84,7 +104,7 @@ def make_grid(x,y):
             links[i][it] = target
             tdist2 = (grid[i][POS] - grid[target][POS])**2
             link_lens[i][it][LEN] = sqrt(tdist2[0] + tdist2[1])
-            link_lens[i][it][MAX_LEN] = link_lens[i][it][LEN] * (len_mult_min + random() * (len_mult_max - len_mult_min))
+            link_lens[i][it][MAX_LEN] = link_lens[i][it][LEN] * (len_mult_min + rng() * (len_mult_max - len_mult_min))
 
     return grid,links,link_lens
 
@@ -133,8 +153,8 @@ def relax(grid, links, link_lens, iterations):
                 grid[i][POS] += accum[i] / weight[i]
 
 
-@jit((float64[:,:,:], int64[:,:], float64[:,:], int64))
-def iterate(grid, links, link_lens, constraint_iterations=5):
+@jit((float64[:,:,:], int64[:,:], float64[:,:]))
+def iterate(grid, links, link_lens):
     breaks = 1
     # A number of breaks is allowed per iteration
     # When one link breaks we:
@@ -142,7 +162,7 @@ def iterate(grid, links, link_lens, constraint_iterations=5):
     # Recalculate the strains in the grid
     while breaks > 0:
         # Apply constraints
-        relax(grid, links, link_lens, constraint_iterations)
+        relax(grid, links, link_lens, relax_iterations)
 
         # calculate the strain and adjust link length for all the links
         # If we get through all the length adjustments without a break then we
@@ -258,12 +278,14 @@ def main():
         print("Make Grid Elapsed:", t1-t0)
 
         t0 = time.time()
-        shuffle(grid, links)
+        shuffle(grid, links, link_lens)
         t1 = time.time()
         print("Shuffle Elapsed:", t1-t0)
 
         t0 = time.time()
         draw(grid, links, save_fn, -1)
+        #relax(grid, links, link_lens, 1)
+        #draw(grid, links, save_fn, -2)
         t1 = time.time()
         print("Draw Elapsed:", t1-t0)
 

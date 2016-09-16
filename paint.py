@@ -27,8 +27,8 @@ gnd_max = 2.0
 len_mult_min = 1.1
 len_mult_max = 1.5
 
-lcs = 0.50 # link constraint strength
-gcs = 0.99 # ground constraint strength
+lcs = 1.00 # link constraint strength
+gcs = 1.00 # ground constraint strength
 lef = 0.50 # link expansion factor
 gef = 0.75 # ground link expansion factor
 
@@ -43,12 +43,9 @@ rng = lambda : abs(np.random.normal())
 gnd_link = lambda i,x,y: 0. if random() > 0.5 else -1 # Some attached
 #gnd_link = lambda i,x,_: 0 if i % x == 0 or i % x == x-1 else -1 # Attach vertical edges only
 
-relax_iterations = 50 # how many iterations of the constraint solver to apply - more=accurate, fewer=fast
-                      # if it's set too low then the forces applied may not be able to propogate
-                      # through the whole net in time causing non-physicsy things to happen
-                      # Generally you need at more iterations than there
-                      # are horizontal or vertical links for reasonable
-                      # certainty
+max_relax_iterations = 500 # Relaxation has an automatic convergence detector so this is the absolute
+                           # max iterations allowed.
+                      
 
 #@jit((float64[:,:,:], int64[:,:]))
 def shuffle(grid, links, link_lens):
@@ -114,14 +111,19 @@ def expand_grid(grid):
         g[GND][X] *= 1.1
 
 np.seterr(all='raise')
-@jit((float64[:,:,:], int64[:,:], float64[:,:], int64))
-def relax(grid, links, link_lens, iterations):
-
+@jit((float64[:,:,:], int64[:,:], float64[:,:]))
+def relax(grid, links, link_lens):
     # accumulate all the vectors and their weights into:
     accum = np.zeros((grid.shape[0], 2), dtype=np.float64)
     weight = np.zeros(grid.shape[0], dtype=np.float64)
 
-    for _ in range(iterations):
+    last_err = 99999999.
+    err = last_err - 1
+    for _ in range(max_relax_iterations):
+        # Stop if the error is relatively stable.
+        if last_err - err < 0.1: break
+        last_err, err = err, 0.
+
         accum.fill(0.)
         weight.fill(0.)
         for i in range(grid.shape[0]):
@@ -131,6 +133,7 @@ def relax(grid, links, link_lens, iterations):
                 d = grid[i][POS] - grid[link][POS]
 
                 dmag = sqrt(d[0]**2 + d[1]**2)
+                err += dmag - grid[i][GND_LEN][LEN]
                 if dmag > 0.:
                     mv = lcs * 0.5 * (dmag - link_len[LEN]) * d / dmag
                     accum[i] -= mv
@@ -142,6 +145,7 @@ def relax(grid, links, link_lens, iterations):
             if grid[i][GND_LEN][LEN] > -1: # not broken
                 d = grid[i][POS] - grid[i][GND]
                 dmag = sqrt(d[0]**2 + d[1]**2)
+                err += dmag - grid[i][GND_LEN][LEN]
                 if dmag > 0.:
                     mv = gcs * (dmag - grid[i][GND_LEN][LEN]) * d / dmag
                     accum[i] -= mv
@@ -162,7 +166,7 @@ def iterate(grid, links, link_lens):
     # Recalculate the strains in the grid
     while breaks > 0:
         # Apply constraints
-        relax(grid, links, link_lens, relax_iterations)
+        relax(grid, links, link_lens)
 
         # calculate the strain and adjust link length for all the links
         # If we get through all the length adjustments without a break then we

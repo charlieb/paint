@@ -35,12 +35,12 @@ gef = 0.75 # ground link expansion factor
 allowed_breaks = 5 # the number of link breaks before a re-relaxation is triggered
                    # higher number = higher performance but may impact accuracy if too high
 
-# Randome number generator choice
-rng = lambda : abs(np.random.normal())
-#rng = random
+# Random number generator choice
+rng = lambda mini, maxi: np.random.normal((maxi+mini)/2., (maxi-mini)/6.)
+#rng = lambda maxi, mini: mini + random() * (maxi-mini)
 
 #gnd_link = lambda i,x,y: 0 # All attached 
-gnd_link = lambda i,x,y: 0. if random() > 0.5 else -1 # Some attached
+gnd_link = lambda i,x,y: 0. if random() > 0.75 else -1 # Some attached
 #gnd_link = lambda i,x,_: 0 if i % x == 0 or i % x == x-1 else -1 # Attach vertical edges only
 
 max_relax_iterations = 500 # Relaxation has an automatic convergence detector so this is the absolute
@@ -84,7 +84,7 @@ def make_grid(x,y):
         g[POS] = [i%x - x/2., i//x - y/2.]
         g[GND] = [i%x - x/2., i//x - y/2.]
         g[GND_LEN][LEN] = gnd_link(i,x,y)
-        g[GND_LEN][MAX_LEN] = gnd_min + rng() * (gnd_max - gnd_min)
+        g[GND_LEN][MAX_LEN] = rng(gnd_min, gnd_max)
         links[i] = [-1]*nlinks
         link_lens[i] = [[0.,0.]]*nlinks
 
@@ -101,7 +101,7 @@ def make_grid(x,y):
             links[i][it] = target
             tdist2 = (grid[i][POS] - grid[target][POS])**2
             link_lens[i][it][LEN] = sqrt(tdist2[0] + tdist2[1])
-            link_lens[i][it][MAX_LEN] = link_lens[i][it][LEN] * (len_mult_min + rng() * (len_mult_max - len_mult_min))
+            link_lens[i][it][MAX_LEN] = link_lens[i][it][LEN] * rng(len_mult_min, len_mult_max)
 
     return grid,links,link_lens
 

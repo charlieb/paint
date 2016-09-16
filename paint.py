@@ -22,15 +22,16 @@ X=0
 Y=1
 
 # Behaviour constants
+# Gnd values are the absolute lengths 
 gnd_min = 0.1
 gnd_max = 2.0
+# These are the multipliers that are applied to the starting length to calc the
+# max allowed len.
 len_mult_min = 1.1
 len_mult_max = 1.5
 
 lcs = 1.00 # link constraint strength
 gcs = 1.00 # ground constraint strength
-lef = 0.50 # link expansion factor
-gef = 0.75 # ground link expansion factor
 
 allowed_breaks = 5 # the number of link breaks before a re-relaxation is triggered
                    # higher number = higher performance but may impact accuracy if too high
@@ -40,8 +41,10 @@ rng = lambda mini, maxi: np.random.normal((maxi+mini)/2., (maxi-mini)/6.)
 #rng = lambda maxi, mini: mini + random() * (maxi-mini)
 
 #gnd_link = lambda i,x,y: 0 # All attached 
-gnd_link = lambda i,x,y: 0. if random() > 0.75 else -1 # Some attached
+#gnd_link = lambda i,x,y: 0. if random() > 0.75 else -1 # Some attached
 #gnd_link = lambda i,x,_: 0 if i % x == 0 or i % x == x-1 else -1 # Attach vertical edges only
+# Vertical edges always other points sometimes
+gnd_link = lambda i,x,_: 0 if i % x == 0 or i % x == x-1 or random() > 0.25 else -1 
 
 max_relax_iterations = 500 # Relaxation has an automatic convergence detector so this is the absolute
                            # max iterations allowed.

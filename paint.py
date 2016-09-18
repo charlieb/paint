@@ -10,7 +10,7 @@ import getopt
 
 # Init size constant
 nlinks = 3
-x,y = 20,20
+x,y = 50,50
 
 # Array reference constants
 POS=0
@@ -44,7 +44,7 @@ rng = lambda mini, maxi: np.random.normal((maxi+mini)/2., (maxi-mini)/6.)
 #gnd_link = lambda i,x,y: 0. if random() > 0.75 else -1 # Some attached
 #gnd_link = lambda i,x,_: 0 if i % x == 0 or i % x == x-1 else -1 # Attach vertical edges only
 # Vertical edges always other points sometimes
-gnd_link = lambda i,x,_: 0 if i % x == 0 or i % x == x-1 or random() > 0.25 else -1 
+gnd_link = lambda i,x,_: 0 if i % x == 0 or i % x == x-1 or random() > 0.75 else -1 
 
 max_relax_iterations = 500 # Relaxation has an automatic convergence detector so this is the absolute
                            # max iterations allowed.
@@ -114,7 +114,7 @@ def expand_grid(grid):
         g[GND][X] *= 1.1
 
 np.seterr(all='raise')
-@jit((float64[:,:,:], int64[:,:], float64[:,:]))
+#@jit((float64[:,:,:], int64[:,:], float64[:,:]))
 def relax(grid, links, link_lens):
     # accumulate all the vectors and their weights into:
     accum = np.zeros((grid.shape[0], 2), dtype=np.float64)
@@ -160,7 +160,7 @@ def relax(grid, links, link_lens):
                 grid[i][POS] += accum[i] / weight[i]
 
 
-@jit((float64[:,:,:], int64[:,:], float64[:,:]))
+#@jit((float64[:,:,:], int64[:,:], float64[:,:]))
 def iterate(grid, links, link_lens):
     breaks = 1
     # A number of breaks is allowed per iteration
@@ -244,8 +244,8 @@ def draw2(grid, links, filename, frame):
             d = d**2
             r = sqrt(np.sum(d)) / 2.
             line = svg.shapes.Circle((p[0], p[1]), r,
-                                    fill='grey',
-                                    stroke='black',
+                                    fill='black',
+                                    stroke='none',
                                     stroke_width=0.1)
             dwg.add(line)
 
@@ -275,7 +275,7 @@ def main():
             load_fn = arg
 
     if load_fn != '':
-        arys = np.loadz(load_fn)
+        arys = np.load(load_fn)
         grid, links, link_lens = arys['grid'], arys['links'], arys['link_lens']
         draw2(grid, links, load_fn, -1)
     else:

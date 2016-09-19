@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.spatial as spat
 from itertools import product
 from random import random
 from math import sqrt
@@ -10,7 +11,7 @@ import getopt
 
 # Init size constant
 nlinks = 3
-x,y = 50,50
+x,y = 20,20
 
 # Array reference constants
 POS=0
@@ -106,6 +107,76 @@ def make_grid(x,y):
             link_lens[i][it][LEN] = sqrt(tdist2[0] + tdist2[1])
             link_lens[i][it][MAX_LEN] = link_lens[i][it][LEN] * rng(len_mult_min, len_mult_max)
 
+    return grid,links,link_lens
+
+@jit((int64, int64, int64, int64, float64))
+def random_grid(x,y, npoints, max_links=100, max_link_dist=1.5):
+    grid = np.zeros((npoints, 3, 2), dtype=np.float64)
+    links = np.zeros((npoints, max_links), dtype=np.int64)
+    links.fill(-1)
+    link_lens = np.zeros((npoints, max_links, 2), dtype=np.float64)
+    for i in range(npoints):
+        grid[i][POS][X] = x * random() - x/2.
+        grid[i][POS][Y] = y * random() - y/2.
+        grid[i][GND][X] = grid[i][POS][X]
+        grid[i][GND][Y] = grid[i][POS][Y]
+        grid[i][GND_LEN][LEN] = 0. #gnd_link(i,x,y)
+        grid[i][GND_LEN][MAX_LEN] = rng(gnd_min, gnd_max)
+        
+    for i in range(npoints):
+        nlinks = 0
+        for j in range(npoints):
+            d = grid[i][POS] - grid[j][POS]
+            dist = sqrt(d[0]**2 + d[1]**2)
+            if dist < max_link_dist:
+                if nlinks >= max_links:
+                    print('Ran out of links')
+                else:
+                    links[i][nlinks] = j
+                    link_lens[i][nlinks][LEN] = dist
+                    link_lens[i][nlinks][MAX_LEN] = link_lens[i][nlinks][LEN] * rng(len_mult_min, len_mult_max)
+                    nlinks += 1
+    return grid,links,link_lens
+
+#@jit((int64, int64, int64, int64, float64))
+def random_triangle_grid(x,y, npoints, max_links=100, max_link_dist=1.5):
+    grid = np.zeros((npoints, 3, 2), dtype=np.float64)
+    links = np.zeros((npoints, max_links), dtype=np.int64)
+    links.fill(-1)
+    link_lens = np.zeros((npoints, max_links, 2), dtype=np.float64)
+    for i in range(npoints):
+        grid[i][POS][X] = x * random() - x/2.
+        grid[i][POS][Y] = y * random() - y/2.
+        grid[i][GND][X] = grid[i][POS][X]
+        grid[i][GND][Y] = grid[i][POS][Y]
+        grid[i][GND_LEN][LEN] = 0. #gnd_link(i,x,y)
+        grid[i][GND_LEN][MAX_LEN] = rng(gnd_min, gnd_max)
+
+    # could replace with a reduce call but I didn't 
+    tri_links = []
+    for tri in spat.Delaunay(grid[:,POS]).simplices:
+        tri_links += [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]]
+    # Remove all the outer segments (de-convex hull the mesh) because the line
+    # segments in the convex hull tend to be much larger make the result look
+    # ugly
+    for seg in spat.ConvexHull(grid[:,POS]).simplices:
+        pass
+
+    nlinks = np.zeros(npoints, dtype=np.int64)
+    tri_links = list(set(tuple(p) for p in tri_links))
+    tri_links.sort(key=lambda x: x[0])
+    for i,j in tri_links:
+        links[i][nlinks[i]] = j
+        if nlinks[i] >= max_links:
+            print('Ran out of links')
+        else:
+            links[i][nlinks[i]] = j
+            d = grid[i][POS] - grid[j][POS]
+            dist = sqrt(d[0]**2 + d[1]**2)
+            link_lens[i][nlinks[i]][LEN] = dist
+            link_lens[i][nlinks[i]][MAX_LEN] = link_lens[i][nlinks[i]][LEN] * rng(len_mult_min, len_mult_max)
+            nlinks[i] += 1
+        
     return grid,links,link_lens
 
 #@jit(nopython=True)
@@ -262,32 +333,41 @@ def print_grid(grid, links, link_lens):
 
 def main():
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "s:l:", ('save=', 'load='))
+        opts, args = getopt.getopt(sys.argv[1:], "s:l:r", ('save=', 'load='))
     except getopt.GetoptError:
         print('Arg fail')
 
     save_fn = 'default_save.npy'
     load_fn = ''
+    rand_grid = False
     for opt,arg in opts:
         if opt in ('-s', '--save'):
             save_fn = arg
         elif opt in ('-l', '--load'):
             load_fn = arg
+        elif opt in ('-r', '--random'):
+            rand_grid = True
 
     if load_fn != '':
         arys = np.load(load_fn)
         grid, links, link_lens = arys['grid'], arys['links'], arys['link_lens']
         draw2(grid, links, load_fn, -1)
     else:
-        t0 = time.time()
-        grid, links, link_lens = make_grid(x,y)
-        t1 = time.time()
-        print("Make Grid Elapsed:", t1-t0)
+        if rand_grid:
+            t0 = time.time()
+            grid, links, link_lens = random_triangle_grid(x,y, 800)
+            t1 = time.time()
+            print("Make Random Grid Elapsed:", t1-t0)
+        else: 
+            t0 = time.time()
+            grid, links, link_lens = make_grid(x,y)
+            t1 = time.time()
+            print("Make Grid Elapsed:", t1-t0)
 
-        t0 = time.time()
-        shuffle(grid, links, link_lens)
-        t1 = time.time()
-        print("Shuffle Elapsed:", t1-t0)
+            t0 = time.time()
+            shuffle(grid, links, link_lens)
+            t1 = time.time()
+            print("Shuffle Elapsed:", t1-t0)
 
         t0 = time.time()
         draw(grid, links, save_fn, -1)

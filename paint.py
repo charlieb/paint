@@ -156,15 +156,21 @@ def random_triangle_grid(x,y, npoints, max_links=100, max_link_dist=1.5):
     tri_links = []
     for tri in spat.Delaunay(grid[:,POS]).simplices:
         tri_links += [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]]
+    # order the links within each pair then deduplicate and sort links
+    tri_links = [[min(t[0],t[1]), max(t[0],t[1])] for t in tri_links]
+    tri_links = list(set(tuple(p) for p in tri_links))
+    tri_links.sort(key=lambda x: x[0])
     # Remove all the outer segments (de-convex hull the mesh) because the line
     # segments in the convex hull tend to be much larger make the result look
     # ugly
     for seg in spat.ConvexHull(grid[:,POS]).simplices:
-        pass
+        print(seg)
+        seg_sorted = (min(seg[0], seg[1]), max(seg[0],seg[1]))
+        if seg_sorted in tri_links:
+            print('found')
+            tri_links.remove(seg_sorted)
 
     nlinks = np.zeros(npoints, dtype=np.int64)
-    tri_links = list(set(tuple(p) for p in tri_links))
-    tri_links.sort(key=lambda x: x[0])
     for i,j in tri_links:
         links[i][nlinks[i]] = j
         if nlinks[i] >= max_links:
